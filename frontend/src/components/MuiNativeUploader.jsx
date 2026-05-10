@@ -1,6 +1,5 @@
 import { useState, useCallback, useRef } from 'react';
 import { Box, Button, LinearProgress, Typography, List, ListItem, ListItemIcon, ListItemText, ListItemSecondaryAction, IconButton, Chip, Card, CardContent, Stack, Alert, Paper } from '@mui/material';
-import { CloudUpload as CloudUploadIcon, InsertDriveFile as FileIcon, Delete as DeleteIcon, CheckCircle as CheckCircleIcon, Error as ErrorIcon, Cancel as CancelIcon, Replay as ReplayIcon, Upload as UploadIcon } from '@mui/icons-material';
 import { uploadFile } from '../api/fileApi';
 
 /**
@@ -226,15 +225,15 @@ const MuiNativeUploader = ({
   const getStatusIcon = (status) => {
     switch (status) {
       case 'completed':
-        return <CheckCircleIcon color="success" />;
+        return <span style={{ color: '#4caf50', fontSize: '24px' }}>✓</span>;
       case 'error':
-        return <ErrorIcon color="error" />;
+        return <span style={{ color: '#f44336', fontSize: '24px' }}>✕</span>;
       case 'uploading':
-        return <UploadIcon color="primary" />;
+        return <span style={{ color: '#2196f3', fontSize: '24px' }}>↑</span>;
       case 'cancelled':
-        return <CancelIcon color="disabled" />;
+        return <span style={{ color: '#9e9e9e', fontSize: '24px' }}>✕</span>;
       default:
-        return <FileIcon color="action" />;
+        return <span style={{ color: '#757575', fontSize: '24px' }}>📄</span>;
     }
   };
 
@@ -278,7 +277,7 @@ const MuiNativeUploader = ({
           },
         }}
       >
-        <CloudUploadIcon sx={{ fontSize: 64, color: 'primary.main', mb: 2 }} />
+        <span style={{ fontSize: '64px', color: '#1976d2', display: 'block', marginBottom: '8px' }}>⬆️</span>
         <Typography variant="h6" gutterBottom>
           将文件拖放到此处进行上传
         </Typography>
@@ -291,7 +290,6 @@ const MuiNativeUploader = ({
         <Stack direction="row" spacing={1}>
           <Button
             variant="contained"
-            startIcon={<UploadIcon />}
             onClick={handleUploadAll}
             disabled={!hasPending || isUploading}
           >
@@ -299,7 +297,6 @@ const MuiNativeUploader = ({
           </Button>
           <Button
             variant="outlined"
-            startIcon={<CancelIcon />}
             onClick={handleCancelAll}
             disabled={!isUploading && !hasPending}
           >
@@ -308,7 +305,6 @@ const MuiNativeUploader = ({
           <Button
             variant="outlined"
             color="error"
-            startIcon={<DeleteIcon />}
             onClick={handleClearAll}
             disabled={!hasFiles}
           >
@@ -407,12 +403,12 @@ const MuiNativeUploader = ({
                   <ListItemSecondaryAction>
                     {item.status === 'error' && (
                       <IconButton edge="end" onClick={() => handleRetryFile(item)} color="primary">
-                        <ReplayIcon />
+                        <span>↻</span>
                       </IconButton>
                     )}
                     {(item.status === 'pending' || item.status === 'cancelled') && !uploadingIds.has(item.id) && (
                       <IconButton edge="end" onClick={() => handleRemoveFile(item.id)} color="error">
-                        <DeleteIcon />
+                        <span>🗑</span>
                       </IconButton>
                     )}
                   </ListItemSecondaryAction>

@@ -1,6 +1,5 @@
 import { useState, useCallback, useRef } from 'react';
 import { Box, Button, LinearProgress, Typography, List, ListItem, ListItemIcon, ListItemText, ListItemSecondaryAction, IconButton, Chip, Card, CardContent, Stack, Alert, Paper } from '@mui/material';
-import { CloudUpload as CloudUploadIcon, InsertDriveFile as FileIcon, Delete as DeleteIcon, CheckCircle as CheckCircleIcon, Error as ErrorIcon, Cancel as CancelIcon, Replay as ReplayIcon, Upload as UploadIcon, FileUpload as FileUploadIcon } from '@mui/icons-material';
 import { uploadFile } from '../api/fileApi';
 
 /**
@@ -226,15 +225,15 @@ const MuiCompactUploader = ({
   const getStatusIcon = (status) => {
     switch (status) {
       case 'completed':
-        return <CheckCircleIcon color="success" />;
+        return <span style={{ color: '#4caf50', fontSize: '24px' }}>✓</span>;
       case 'error':
-        return <ErrorIcon color="error" />;
+        return <span style={{ color: '#f44336', fontSize: '24px' }}>✕</span>;
       case 'uploading':
-        return <UploadIcon color="primary" />;
+        return <span style={{ color: '#2196f3', fontSize: '24px' }}>↑</span>;
       case 'cancelled':
-        return <CancelIcon color="disabled" />;
+        return <span style={{ color: '#9e9e9e', fontSize: '24px' }}>✕</span>;
       default:
-        return <FileIcon color="action" />;
+        return <span style={{ color: '#757575', fontSize: '24px' }}>📄</span>;
     }
   };
 
@@ -277,10 +276,10 @@ const MuiCompactUploader = ({
           },
         }}
       >
-        <Stack direction="row" spacing={2} alignItems="center" justifyContent="space-between">
+        <Stack direction="row" spacing={2} alignItems="center" justifyContent="space-between" sx={{ py: 0.5 }}>
           <Stack direction="row" spacing={2} alignItems="center">
-            <FileUploadIcon color="primary" />
-            <Typography variant="body2" color="text.secondary">
+            <Box component="span" sx={{ fontSize: '24px', display: 'flex', alignItems: 'center' }}>⬆️</Box>
+            <Typography variant="body2" color="text.secondary" sx={{ display: 'flex', alignItems: 'center' }}>
               将文件拖放到此处进行上传 或
             </Typography>
             <Button
@@ -308,7 +307,6 @@ const MuiCompactUploader = ({
                 <Button
                   size="small"
                   variant="contained"
-                  startIcon={<UploadIcon />}
                   onClick={handleUploadAll}
                   disabled={!hasPending || isUploading}
                 >
@@ -317,7 +315,6 @@ const MuiCompactUploader = ({
                 <Button
                   size="small"
                   variant="outlined"
-                  startIcon={<CancelIcon />}
                   onClick={handleCancelAll}
                   disabled={!isUploading && !hasPending}
                 >
@@ -327,7 +324,6 @@ const MuiCompactUploader = ({
                   size="small"
                   variant="outlined"
                   color="error"
-                  startIcon={<DeleteIcon />}
                   onClick={handleClearAll}
                   disabled={!hasFiles}
                 >
@@ -421,12 +417,12 @@ const MuiCompactUploader = ({
                   <ListItemSecondaryAction>
                     {item.status === 'error' && (
                       <IconButton edge="end" onClick={() => handleRetryFile(item)} color="primary" size="small">
-                        <ReplayIcon fontSize="small" />
+                        <span>↻</span>
                       </IconButton>
                     )}
                     {(item.status === 'pending' || item.status === 'cancelled') && !uploadingIds.has(item.id) && (
                       <IconButton edge="end" onClick={() => handleRemoveFile(item.id)} color="error" size="small">
-                        <DeleteIcon fontSize="small" />
+                        <span>🗑</span>
                       </IconButton>
                     )}
                   </ListItemSecondaryAction>
