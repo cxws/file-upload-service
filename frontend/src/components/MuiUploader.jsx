@@ -1,0 +1,413 @@
+import { useState, useCallback } from 'react';
+import { Box, Button, LinearProgress, Typography, List, ListItem, ListItemIcon, ListItemText, ListItemSecondaryAction, IconButton, Chip, Card, CardContent, Stack, Alert, Paper } from '@mui/material';
+import { CloudUpload as CloudUploadIcon, InsertDriveFile as FileIcon, Delete as DeleteIcon, CheckCircle as CheckCircleIcon, Error as ErrorIcon, Cancel as CancelIcon, Replay as ReplayIcon, Upload as UploadIcon } from '@mui/icons-material';
+import { useDropzone } from 'react-dropzone';
+import { uploadFile } from '../api/fileApi';
+
+/**
+ * MUI风格高级文件上传组件
+ * 使用 react-dropzone 实现拖拽上传
+ *
+ * @param {Object} props
+ * @param {boolean} [props.multiple=true] - 是否支持多文件上传
+ * @param {string} [props.accept] - 接受的文件类型，如 "image/*,.pdf,.doc"
+ * @param {number} [props.maxFileSize] - 单个文件最大大小（字节）
+ * @param {number} [props.maxFiles=10] - 最大文件数量
+ * @param {Function} [props.onUploadStart] - 上传开始回调
+ * @param {Function} [props.onUploadProgress] - 上传进度回调
+ * @param {Function} [props.onUploadSuccess] - 上传成功回调
+ * @param {Function} [props.onUploadError] - 上传失败回调
+ * @param {Function} [props.onAllUploadComplete] - 全部上传完成回调
+ */
+const MuiUploader = ({
+  multiple = true,
+  accept,
+  maxFileSize,
+  maxFiles = 10,
+  onUploadStart,
+  onUploadProgress,
+  onUploadSuccess,
+  onUploadError,
+  onAllUploadComplete,
+}) => {
+  const [fileList, setFileList] = useState([]);
+  const [uploadingIds, setUploadingIds] = useState(new Set());
+  const [validationErrors, setValidationErrors] = useState([]);
+
+  const generateFileId = (file) => `${file.name}-${file.size}-${Date.now()}`;
+
+  const formatFileSize = (bytes) => {
+    if (!bytes) return '0 B';
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  };
+
+  const validateFiles = useCallback((files) => {
+    const errors = [];
+    const validFiles = [];
+
+    Array.from(files).forEach((file) => {
+      let error = null;
+
+      if (maxFileSize && file.size > maxFileSize) {
+        error = `文件 "${file.name}" 大小超出限制（${formatFileSize(maxFileSize)}）`;
+      } else if (accept) {
+        const acceptTypes = accept.split(',').map(t => t.trim());
+        const fileType = file.type;
+        const fileName = file.name.toLowerCase();
+        const isValid = acceptTypes.some(type => {
+          if (type.startsWith('.')) {
+            return fileName.endsWith(type.toLowerCase());
+          } else if (type.endsWith('/*')) {
+            const category = type.split('/')[0];
+            return fileType.startsWith(category + '/');
+          } else {
+            return fileType === type;
+          }
+        });
+        if (!isValid) {
+          error = `文件 "${file.name}" 类型不支持`;
+        }
+      }
+
+      if (error) {
+        errors.push(error);
+      } else {
+        validFiles.push(file);
+      }
+    });
+
+    if (maxFiles && (fileList.length + validFiles.length) > maxFiles) {
+      errors.push(`文件数量超出限制（最多 ${maxFiles} 个）`);
+      return { errors, validFiles: validFiles.slice(0, maxFiles - fileList.length) };
+    }
+
+    return { errors, validFiles };
+  }, [accept, maxFileSize, maxFiles, fileList]);
+
+  const onDrop = useCallback((acceptedFiles, rejectedFiles) => {
+    const errors = [];
+
+    rejectedFiles.forEach(({ file, errors: errs }) => {
+      errs.forEach(err => {
+        if (err.code === 'file-too-large') {
+          errors.push(`文件 "${file.name}" 大小超出限制`);
+        } else if (err.code === 'file-invalid-type') {
+          errors.push(`文件 "${file.name}" 类型不支持`);
+        } else if (err.code === 'too-many-files') {
+          errors.push('文件数量超出限制');
+        } else {
+          errors.push(`文件 "${file.name}" ${err.message}`);
+        }
+      });
+    });
+
+    const { errors: validationErrors, validFiles } = validateFiles(acceptedFiles);
+
+    if ([...errors, ...validationErrors].length > 0) {
+      setValidationErrors([...errors, ...validationErrors]);
+    }
+
+    if (validFiles.length > 0) {
+      const newFiles = validFiles.map(file => ({
+        id: generateFileId(file),
+        file,
+        name: file.name,
+        size: file.size,
+        type: file.type,
+        status: 'pending',
+        progress: 0,
+        error: null,
+      }));
+      setFileList(prev => [...prev, ...newFiles]);
+    }
+  }, [validateFiles]);
+
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+    onDrop,
+    accept: accept?.split(',').reduce((acc, type) => {
+      const trimmedType = type.trim();
+      if (trimmedType.startsWith('.')) {
+        return { ...acc, [`.${trimmedType.substring(1)}`]: [] };
+      }
+      return { ...acc, [trimmedType]: [] };
+    }, {}) || undefined,
+    maxSize: maxFileSize,
+    maxFiles: maxFiles,
+    multiple,
+  });
+
+  const uploadSingleFile = async (fileItem) => {
+    const { id, file } = fileItem;
+
+    setUploadingIds(prev => new Set([...prev, id]));
+    setFileList(prev => prev.map(f => f.id === id ? { ...f, status: 'uploading' } : f));
+
+    onUploadStart?.({ fileId: id, fileName: file.name, fileSize: file.size });
+
+    try {
+      const result = await uploadFile(file, {
+        onProgress: (progressEvent) => {
+          const percent = Math.round((progressEvent.loaded / progressEvent.total) * 100);
+          setFileList(prev => prev.map(f => f.id === id ? { ...f, progress: percent } : f));
+          onUploadProgress?.({ fileId: id, fileName: file.name, percent, loaded: progressEvent.loaded, total: progressEvent.total });
+        },
+      });
+
+      setFileList(prev => prev.map(f => f.id === id ? { ...f, status: 'completed', progress: 100, result } : f));
+      onUploadSuccess?.({ fileId: id, fileName: file.name, fileInfo: result });
+
+    } catch (error) {
+      const errorMsg = error.message || '上传失败';
+      setFileList(prev => prev.map(f => f.id === id ? { ...f, status: 'error', error: errorMsg } : f));
+      onUploadError?.({ fileId: id, fileName: file.name, error: errorMsg });
+    } finally {
+      setUploadingIds(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(id);
+        return newSet;
+      });
+      checkAllUploadComplete();
+    }
+  };
+
+  const checkAllUploadComplete = () => {
+    const pendingFiles = fileList.filter(f => f.status === 'pending' || f.status === 'uploading');
+    if (pendingFiles.length === 0 && uploadingIds.size === 0) {
+      const completedFiles = fileList.filter(f => f.status === 'completed');
+      const failedFiles = fileList.filter(f => f.status === 'error');
+      onAllUploadComplete?.({ success: completedFiles.length, failed: failedFiles.length, files: fileList });
+    }
+  };
+
+  const handleUploadAll = () => {
+    const pendingFiles = fileList.filter(f => f.status === 'pending');
+    if (pendingFiles.length === 0) return;
+    pendingFiles.forEach(f => uploadSingleFile(f));
+  };
+
+  const handleRemoveFile = (fileId) => {
+    if (uploadingIds.has(fileId)) return;
+    setFileList(prev => prev.filter(f => f.id !== fileId));
+  };
+
+  const handleRetryFile = (fileItem) => {
+    if (fileItem.status === 'error') {
+      uploadSingleFile(fileItem);
+    }
+  };
+
+  const handleCancelAll = () => {
+    setFileList(prev => prev.map(f => {
+      if (f.status === 'uploading' || f.status === 'pending') {
+        return { ...f, status: 'cancelled' };
+      }
+      return f;
+    }));
+    setUploadingIds(new Set());
+  };
+
+  const handleClearAll = () => {
+    const uploadingFiles = fileList.filter(f => uploadingIds.has(f.id));
+    if (uploadingFiles.length > 0) return;
+    setFileList([]);
+    setValidationErrors([]);
+  };
+
+  const getStatusIcon = (status) => {
+    switch (status) {
+      case 'completed':
+        return <CheckCircleIcon color="success" />;
+      case 'error':
+        return <ErrorIcon color="error" />;
+      case 'uploading':
+        return <UploadIcon color="primary" />;
+      case 'cancelled':
+        return <CancelIcon color="disabled" />;
+      default:
+        return <FileIcon color="action" />;
+    }
+  };
+
+  const pendingCount = fileList.filter(f => f.status === 'pending').length;
+  const completedCount = fileList.filter(f => f.status === 'completed').length;
+  const errorCount = fileList.filter(f => f.status === 'error').length;
+  const uploadingCount = fileList.filter(f => f.status === 'uploading').length;
+  const hasFiles = fileList.length > 0;
+  const hasPending = pendingCount > 0;
+  const isUploading = uploadingCount > 0;
+
+  return (
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+      <input {...getInputProps()} />
+
+      <Paper
+        elevation={0}
+        {...getRootProps()}
+        sx={{
+          border: '2px dashed',
+          borderColor: isDragActive ? 'primary.main' : 'grey.300',
+          borderRadius: 2,
+          p: 4,
+          textAlign: 'center',
+          bgcolor: isDragActive ? 'primary.light' : 'grey.50',
+          transition: 'all 0.3s',
+          cursor: 'pointer',
+          '&:hover': {
+            borderColor: 'primary.main',
+            bgcolor: 'primary.light',
+          },
+        }}
+      >
+        <CloudUploadIcon sx={{ fontSize: 64, color: 'primary.main', mb: 2 }} />
+        <Typography variant="h6" gutterBottom>
+          将文件拖放到此处进行上传
+        </Typography>
+        <Typography variant="body2" color="text.secondary">
+          或点击选择文件
+        </Typography>
+      </Paper>
+
+      <Stack direction="row" spacing={2} justifyContent="space-between" alignItems="center">
+        <Stack direction="row" spacing={1}>
+          <Button
+            variant="contained"
+            startIcon={<UploadIcon />}
+            onClick={handleUploadAll}
+            disabled={!hasPending || isUploading}
+          >
+            上传 {pendingCount > 0 ? `(${pendingCount})` : ''}
+          </Button>
+          <Button
+            variant="outlined"
+            startIcon={<CancelIcon />}
+            onClick={handleCancelAll}
+            disabled={!isUploading && !hasPending}
+          >
+            取消
+          </Button>
+          <Button
+            variant="outlined"
+            color="error"
+            startIcon={<DeleteIcon />}
+            onClick={handleClearAll}
+            disabled={!hasFiles}
+          >
+            清除
+          </Button>
+        </Stack>
+
+        {hasFiles && (
+          <Stack direction="row" spacing={1}>
+            {completedCount > 0 && <Chip label={`成功 ${completedCount}`} color="success" size="small" />}
+            {errorCount > 0 && <Chip label={`失败 ${errorCount}`} color="error" size="small" />}
+            {uploadingCount > 0 && <Chip label={`上传中 ${uploadingCount}`} color="primary" variant="outlined" size="small" />}
+            {pendingCount > 0 && <Chip label={`待上传 ${pendingCount}`} variant="outlined" size="small" />}
+          </Stack>
+        )}
+      </Stack>
+
+      {validationErrors.length > 0 && (
+        <Alert severity="error" onClose={() => setValidationErrors([])}>
+          <Typography variant="subtitle2" gutterBottom>验证错误：</Typography>
+          <ul style={{ margin: 0, paddingLeft: 20 }}>
+            {validationErrors.map((err, idx) => (
+              <li key={idx}><Typography variant="body2">{err}</Typography></li>
+            ))}
+          </ul>
+        </Alert>
+      )}
+
+      {fileList.length > 0 && (
+        <Card variant="outlined">
+          <CardContent sx={{ p: 0, '&:last-child': { pb: 0 } }}>
+            <Box sx={{ bgcolor: 'grey.100', p: 2, borderBottom: '1px solid', borderColor: 'divider' }}>
+              <Typography variant="subtitle1" fontWeight={500}>
+                文件列表 ({fileList.length})
+              </Typography>
+            </Box>
+            <List sx={{ maxHeight: 350, overflow: 'auto', p: 0 }}>
+              {fileList.map((item) => (
+                <ListItem
+                  key={item.id}
+                  sx={{
+                    bgcolor: item.status === 'error' ? 'error.light' : item.status === 'cancelled' ? 'grey.100' : 'background.paper',
+                    borderBottom: '1px solid',
+                    borderColor: 'divider',
+                  }}
+                >
+                  <ListItemIcon>
+                    {getStatusIcon(item.status)}
+                  </ListItemIcon>
+                  <ListItemText
+                    primary={
+                      <Typography
+                        variant="body1"
+                        sx={{
+                          textDecoration: item.status === 'cancelled' ? 'line-through' : 'none',
+                          color: item.status === 'cancelled' ? 'text.disabled' : 'text.primary',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                          maxWidth: 300,
+                        }}
+                      >
+                        {item.name}
+                      </Typography>
+                    }
+                    secondary={
+                      <Box>
+                        <Typography variant="body2" color="text.secondary" component="span">
+                          {formatFileSize(item.size)}
+                          {item.status === 'error' && (
+                            <Typography variant="body2" color="error" component="span" sx={{ ml: 1 }}>
+                              — {item.error}
+                            </Typography>
+                          )}
+                          {item.status === 'completed' && (
+                            <Typography variant="body2" color="success.main" component="span" sx={{ ml: 1 }}>
+                              — 上传成功
+                            </Typography>
+                          )}
+                          {item.status === 'cancelled' && (
+                            <Typography variant="body2" color="text.disabled" component="span" sx={{ ml: 1 }}>
+                              — 已取消
+                            </Typography>
+                          )}
+                        </Typography>
+                        {item.status === 'uploading' && (
+                          <LinearProgress
+                            variant="determinate"
+                            value={item.progress || 0}
+                            sx={{ mt: 1 }}
+                          />
+                        )}
+                      </Box>
+                    }
+                  />
+                  <ListItemSecondaryAction>
+                    {item.status === 'error' && (
+                      <IconButton edge="end" onClick={() => handleRetryFile(item)} color="primary">
+                        <ReplayIcon />
+                      </IconButton>
+                    )}
+                    {(item.status === 'pending' || item.status === 'cancelled') && !uploadingIds.has(item.id) && (
+                      <IconButton edge="end" onClick={() => handleRemoveFile(item.id)} color="error">
+                        <DeleteIcon />
+                      </IconButton>
+                    )}
+                  </ListItemSecondaryAction>
+                </ListItem>
+              ))}
+            </List>
+          </CardContent>
+        </Card>
+      )}
+    </Box>
+  );
+};
+
+export default MuiUploader;
