@@ -8,7 +8,7 @@ import axios from 'axios';
 // 创建axios实例
 const api = axios.create({
   baseURL: '/api/files',
-  timeout: 60000,
+  timeout: 120000,
 });
 
 // 请求拦截器
@@ -40,95 +40,36 @@ api.interceptors.response.use(
 );
 
 /**
- * 上传单个文件（支持取消和进度回调）
+ * 上传单个文件
  * @param {File} file - 文件对象
  * @param {Object} options - 上传选项
  * @param {string} [options.targetPath] - 目标路径
  * @param {string} [options.description] - 文件描述
  * @param {boolean} [options.overwrite=false] - 是否覆盖
  * @param {Function} [options.onProgress] - 进度回调
- * @param {AbortSignal} [options.signal] - AbortController.signal 用于取消
+ * @param {Function} [options.checkCancel] - 检查是否已取消的函数
  * @returns {Promise<Object>} 文件信息
  */
 export const uploadFile = async (file, options = {}) => {
-  const { signal, onProgress, ...otherOptions } = options;
+  const formData = new FormData();
+  formData.append('file', file);
 
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
+  if (options.targetPath) {
+    formData.append('targetPath', options.targetPath);
+  }
+  if (options.description) {
+    formData.append('description', options.description);
+  }
+  if (options.overwrite !== undefined) {
+    formData.append('overwrite', options.overwrite.toString());
+  }
 
-    // 设置超时
-    xhr.timeout = 60000;
-
-    // 进度回调
-    if (onProgress) {
-      xhr.upload.addEventListener('progress', (event) => {
-        if (event.lengthComputable) {
-          onProgress({
-            loaded: event.loaded,
-            total: event.total,
-            percent: Math.round((event.loaded / event.total) * 100)
-          });
-        }
-      });
-    }
-
-    // 请求完成回调
-    xhr.addEventListener('load', () => {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        try {
-          const response = JSON.parse(xhr.responseText);
-          if (response.success) {
-            resolve(response.data);
-          } else {
-            reject(new Error(response.message || '上传失败'));
-          }
-        } catch (e) {
-          reject(new Error('解析响应失败'));
-        }
-      } else {
-        reject(new Error(`上传失败: ${xhr.status}`));
-      }
-    });
-
-    // 错误回调
-    xhr.addEventListener('error', () => {
-      reject(new Error('网络错误'));
-    });
-
-    // 中止回调
-    xhr.addEventListener('abort', () => {
-      reject(new DOMException('上传已取消', 'AbortError'));
-    });
-
-    // 超时回调
-    xhr.addEventListener('timeout', () => {
-      reject(new Error('上传超时'));
-    });
-
-    // 监听 abort 信号
-    if (signal) {
-      signal.addEventListener('abort', () => {
-        xhr.abort();
-      });
-    }
-
-    // 构建 FormData
-    const formData = new FormData();
-    formData.append('file', file);
-
-    if (otherOptions.targetPath) {
-      formData.append('targetPath', otherOptions.targetPath);
-    }
-    if (otherOptions.description) {
-      formData.append('description', otherOptions.description);
-    }
-    if (otherOptions.overwrite !== undefined) {
-      formData.append('overwrite', otherOptions.overwrite.toString());
-    }
-
-    // 发送请求
-    xhr.open('POST', '/api/files/upload');
-    xhr.send(formData);
+  return await api.post('/upload', formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data',
+    },
+    onUploadProgress: options.onProgress,
+    checkCancel: options.checkCancel,
   });
 };
 
@@ -229,7 +170,7 @@ export const getUploadStatuses = async (fileIds) => {
 };
 
 /**
- * 取消上传
+ * 取消上传（只是标记状态）
  * @param {string} fileId - 文件ID
  * @returns {Promise<boolean>} 是否取消成功
  */

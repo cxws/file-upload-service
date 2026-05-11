@@ -1,4 +1,3 @@
-
 package com.example.fileupload.service.impl;
 
 import com.example.fileupload.dto.response.FileInfoDTO;
@@ -23,7 +22,6 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.nio.file.StandardCopyOption;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -53,7 +51,7 @@ public class FileUploadServiceImpl implements FileUploadService {
 
         // 获取原始文件名
         String originalFileName = StringUtils.cleanPath(file.getOriginalFilename());
-        
+
         // 生成存储文件名
         String storedFileName = generateStoredFileName(originalFileName);
 
@@ -65,9 +63,11 @@ public class FileUploadServiceImpl implements FileUploadService {
             throw new IllegalArgumentException("文件已存在：" + originalFileName);
         }
 
+        UploadFile uploadFile = null;
+
         try {
             // 创建文件记录（状态为上传中）
-            UploadFile uploadFile = UploadFile.builder()
+            uploadFile = UploadFile.builder()
                     .originalFileName(originalFileName)
                     .storedFileName(storedFileName)
                     .fileSize(file.getSize())
@@ -82,8 +82,53 @@ public class FileUploadServiceImpl implements FileUploadService {
             // 确保目录存在
             Files.createDirectories(storagePath.getParent());
 
-            // 保存文件
-            Files.copy(file.getInputStream(), storagePath, StandardCopyOption.REPLACE_EXISTING);
+            // 流式写入文件，并定期检查取消状态
+            long totalBytes = file.getSize();
+            long uploadedBytes = 0;
+            int progress = 0;
+            long lastCheckTime = System.currentTimeMillis();
+
+            try (var inputStream = file.getInputStream();
+                 var outputStream = Files.newOutputStream(storagePath)) {
+                byte[] buffer = new byte[8192];
+                int bytesRead;
+
+                while ((bytesRead = inputStream.read(buffer)) != -1) {
+                    // 检查是否已取消
+                    if (isCancelled(uploadFile.getId())) {
+                        // 删除已写入的部分文件
+                        Files.deleteIfExists(storagePath);
+                        uploadFile.setStatus("CANCELLED");
+                        uploadFile.setProgress(0);
+                        uploadFileRepository.save(uploadFile);
+                        log.info("文件上传已取消：{}", originalFileName);
+                        throw new RuntimeException("文件上传已取消");
+                    }
+
+                    outputStream.write(buffer, 0, bytesRead);
+                    uploadedBytes += bytesRead;
+
+                    // 更新进度
+                    if (totalBytes > 0) {
+                        progress = (int) ((uploadedBytes * 100) / totalBytes);
+                        // 每秒最多更新一次数据库
+                        if (System.currentTimeMillis() - lastCheckTime > 1000) {
+                            uploadFile.setProgress(progress);
+                            uploadFileRepository.save(uploadFile);
+                            lastCheckTime = System.currentTimeMillis();
+                        }
+                    }
+                }
+            }
+
+            // 检查最终是否被取消
+            if (isCancelled(uploadFile.getId())) {
+                Files.deleteIfExists(storagePath);
+                uploadFile.setStatus("CANCELLED");
+                uploadFileRepository.save(uploadFile);
+                log.info("文件上传已取消（完成后检查）：{}", originalFileName);
+                throw new RuntimeException("文件上传已取消");
+            }
 
             // 更新文件状态为完成
             uploadFile.setStatus("COMPLETED");
@@ -96,21 +141,29 @@ public class FileUploadServiceImpl implements FileUploadService {
         } catch (IOException e) {
             log.error("文件上传失败：{}", originalFileName, e);
             // 更新文件状态为失败
-            UploadFile failedFile = uploadFileRepository.findByStoredFileName(storedFileName).orElse(null);
-            if (failedFile != null) {
-                failedFile.setStatus("FAILED");
-                failedFile.setErrorMessage(e.getMessage());
-                uploadFileRepository.save(failedFile);
+            if (uploadFile != null) {
+                uploadFile.setStatus("FAILED");
+                uploadFile.setErrorMessage(e.getMessage());
+                uploadFileRepository.save(uploadFile);
             }
             throw new RuntimeException("文件上传失败：" + e.getMessage(), e);
         }
+    }
+
+    /**
+     * 检查文件是否已被取消
+     */
+    private boolean isCancelled(String fileId) {
+        return uploadFileRepository.findById(fileId)
+                .map(f -> "CANCELLED".equals(f.getStatus()))
+                .orElse(false);
     }
 
     @Override
     @Transactional
     public List<FileInfoDTO> uploadFiles(MultipartFile[] files, String targetPath, String description, Boolean overwrite) {
         List<FileInfoDTO> results = new ArrayList<>();
-        
+
         for (MultipartFile file : files) {
             try {
                 FileInfoDTO dto = uploadFile(file, targetPath, description, overwrite);
@@ -133,12 +186,12 @@ public class FileUploadServiceImpl implements FileUploadService {
                 results.add(convertToDTO(failedFile));
             }
         }
-        
+
         return results;
     }
 
     @Override
-    public FileListResponse getFileList(Integer page, Integer size, String status, String fileName, 
+    public FileListResponse getFileList(Integer page, Integer size, String status, String fileName,
                                         String sortBy, String sortDirection) {
         // 构建排序
         Sort sort = Sort.by(Sort.Direction.fromString(sortDirection), sortBy);
@@ -185,13 +238,13 @@ public class FileUploadServiceImpl implements FileUploadService {
     public UploadStatusDTO getUploadStatus(String fileId) {
         UploadFile uploadFile = uploadFileRepository.findById(fileId)
                 .orElseThrow(() -> new IllegalArgumentException("文件不存在：" + fileId));
-        
+
         return UploadStatusDTO.builder()
                 .fileId(uploadFile.getId())
                 .fileName(uploadFile.getOriginalFileName())
                 .status(uploadFile.getStatus())
                 .progress(uploadFile.getProgress())
-                .uploadedBytes(uploadFile.getProgress() != null ? 
+                .uploadedBytes(uploadFile.getProgress() != null ?
                         (uploadFile.getFileSize() * uploadFile.getProgress()) / 100 : 0)
                 .totalBytes(uploadFile.getFileSize())
                 .errorMessage(uploadFile.getErrorMessage())
@@ -221,7 +274,7 @@ public class FileUploadServiceImpl implements FileUploadService {
             log.info("文件上传已取消：{}", fileId);
             return true;
         }
-        
+
         return false;
     }
 
@@ -267,9 +320,9 @@ public class FileUploadServiceImpl implements FileUploadService {
         UploadFile uploadFile = uploadFileRepository.findById(fileId)
                 .orElseThrow(() -> new IllegalArgumentException("文件不存在：" + fileId));
 
-        // 只有失败的文件可以重试
-        if (!"FAILED".equals(uploadFile.getStatus())) {
-            throw new IllegalArgumentException("只有失败的文件可以重试上传");
+        // 只有失败或取消的文件可以重试
+        if (!"FAILED".equals(uploadFile.getStatus()) && !"CANCELLED".equals(uploadFile.getStatus())) {
+            throw new IllegalArgumentException("只有失败或取消的文件可以重试上传");
         }
 
         // 重置状态
