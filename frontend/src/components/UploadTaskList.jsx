@@ -1,70 +1,26 @@
-
-import { useState, useEffect, useCallback } from 'react';
-import { List, Progress, Tag, Button, message, Card } from 'antd';
-import { CloseOutlined, ReloadOutlined, DeleteOutlined } from '@ant-design/icons';
-import dayjs from 'dayjs';
-import { getUploadStatuses, cancelUpload, deleteFile, retryUpload } from '../api/fileApi';
+import { useState, useCallback } from 'react';
+import { List, ListItem, ListItemText, ListItemIcon, ListItemSecondaryAction, Chip, IconButton, Typography, Card, CardContent, Box } from '@mui/material';
+import { useAsyncUploadContext } from '../context/AsyncUploadContext';
 
 /**
  * 上传任务列表组件
- * 用于实时显示和管理上传任务状态
+ * 使用 AsyncUploadContext 显示和管理上传任务
  * 
  * @param {Object} props
- * @param {Object[]} tasks - 上传任务列表
- * @param {Function} [props.onCancel] - 取消上传回调
- * @param {Function} [props.onRemove] - 移除任务回调
- * @param {Function} [props.onRetry] - 重试上传回调
+ * @param {number} [props.maxHeight=400] - 列表最大高度
  */
-const UploadTaskList = ({ tasks = [], onCancel, onRemove, onRetry }) => {
-  const [taskStatuses, setTaskStatuses] = useState([]);
+const UploadTaskList = ({ maxHeight = 400 }) => {
+  const {
+    tasks,
+    cancelTask,
+    pauseTask,
+    resumeTask,
+    retryTask,
+    clearCompleted,
+  } = useAsyncUploadContext();
 
-  /**
-   * 轮询获取上传状态
-   */
-  useEffect(() => {
-    if (tasks.length === 0) return;
-
-    const interval = setInterval(async () => {
-      const fileIds = tasks.map(t => t.id).filter(Boolean);
-      if (fileIds.length === 0) return;
-
-      try {
-        const statuses = await getUploadStatuses(fileIds);
-        setTaskStatuses(statuses);
-      } catch (error) {
-        console.error('获取上传状态失败:', error);
-      }
-    }, 2000);
-
-    return () => clearInterval(interval);
-  }, [tasks]);
-
-  /**
-   * 获取任务当前状态
-   */
-  const getTaskStatus = useCallback((taskId) => {
-    return taskStatuses.find(s => s.fileId === taskId);
-  }, [taskStatuses]);
-
-  /**
-   * 获取状态标签配置
-   */
-  const getStatusConfig = (status) => {
-    const configs = {
-      PENDING: { color: 'gold', text: '待上传' },
-      UPLOADING: { color: 'blue', text: '上传中' },
-      COMPLETED: { color: 'green', text: '上传成功' },
-      FAILED: { color: 'red', text: '上传失败' },
-      CANCELLED: { color: 'gray', text: '已取消' },
-    };
-    return configs[status] || { color: 'default', text: status };
-  };
-
-  /**
-   * 格式化文件大小
-   */
   const formatFileSize = (bytes) => {
-    if (!bytes) return '-';
+    if (!bytes) return '0 B';
     if (bytes === 0) return '0 B';
     const k = 1024;
     const sizes = ['B', 'KB', 'MB', 'GB'];
@@ -72,182 +28,181 @@ const UploadTaskList = ({ tasks = [], onCancel, onRemove, onRetry }) => {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
-  /**
-   * 处理取消上传
-   */
-  const handleCancel = useCallback(async (task) => {
-    try {
-      await cancelUpload(task.id);
-      message.success(`已取消上传：${task.name}`);
-      onCancel?.(task);
-    } catch (error) {
-      message.error('取消失败：' + error.message);
+  const formatTime = (seconds) => {
+    if (!seconds || seconds === Infinity || isNaN(seconds)) return '-';
+    if (seconds < 60) {
+      return `${Math.round(seconds)}s`;
+    } else if (seconds < 3600) {
+      const mins = Math.floor(seconds / 60);
+      const secs = Math.round(seconds % 60);
+      return `${mins}m ${secs}s`;
+    } else {
+      const hours = Math.floor(seconds / 3600);
+      const mins = Math.floor((seconds % 3600) / 60);
+      return `${hours}h ${mins}m`;
     }
-  }, [onCancel]);
+  };
 
-  /**
-   * 处理删除任务
-   */
-  const handleRemove = useCallback(async (task) => {
-    try {
-      if (task.id) {
-        await deleteFile(task.id);
-      }
-      message.success(`已移除：${task.name}`);
-      onRemove?.(task);
-    } catch (error) {
-      message.error('删除失败：' + error.message);
-    }
-  }, [onRemove]);
+  const formatSpeed = (bytesPerSecond) => {
+    if (!bytesPerSecond || bytesPerSecond === 0) return '-';
+    return formatFileSize(bytesPerSecond) + '/s';
+  };
 
-  /**
-   * 处理重试上传
-   */
-  const handleRetry = useCallback(async (task) => {
-    try {
-      await retryUpload(task.id);
-      message.success(`已重置状态：${task.name}`);
-      onRetry?.(task);
-    } catch (error) {
-      message.error('重试失败：' + error.message);
+  const getStatusIcon = (status) => {
+    switch (status) {
+      case 'COMPLETED':
+        return <span style={{ color: '#4caf50', fontSize: '20px' }}>✓</span>;
+      case 'FAILED':
+        return <span style={{ color: '#f44336', fontSize: '20px' }}>✕</span>;
+      case 'UPLOADING':
+        return <span style={{ color: '#2196f3', fontSize: '20px' }}>↑</span>;
+      case 'PAUSED':
+        return <span style={{ color: '#ff9800', fontSize: '20px' }}>⏸</span>;
+      case 'PENDING':
+        return <span style={{ color: '#9e9e9e', fontSize: '20px' }}>⏳</span>;
+      case 'CANCELLED':
+        return <span style={{ color: '#9e9e9e', fontSize: '20px' }}>✕</span>;
+      default:
+        return <span style={{ color: '#757575', fontSize: '20px' }}>📄</span>;
     }
-  }, [onRetry]);
+  };
 
-  /**
-   * 获取操作按钮
-   */
-  const getActionButtons = (task) => {
-    const status = task.status || getTaskStatus(task.id)?.status;
-    
-    if (status === 'COMPLETED') {
-      return (
-        <Button
-          type="text"
-          danger
-          icon={<DeleteOutlined />}
-          onClick={() => handleRemove(task)}
-        >
-          清除记录
-        </Button>
-      );
+  const getStatusText = (status) => {
+    switch (status) {
+      case 'PENDING':
+        return '待上传';
+      case 'UPLOADING':
+        return '上传中';
+      case 'COMPLETED':
+        return '上传成功';
+      case 'FAILED':
+        return '上传失败';
+      case 'PAUSED':
+        return '已暂停';
+      case 'CANCELLED':
+        return '已取消';
+      default:
+        return status;
     }
-    
-    if (status === 'FAILED') {
-      return (
-        <>
-          <Button
-            type="text"
-            icon={<ReloadOutlined />}
-            onClick={() => handleRetry(task)}
-          >
-            重试
-          </Button>
-          <Button
-            type="text"
-            danger
-            icon={<DeleteOutlined />}
-            onClick={() => handleRemove(task)}
-          >
-            清除记录
-          </Button>
-        </>
-      );
+  };
+
+  const getStatusColor = (status) => {
+    switch (status) {
+      case 'COMPLETED':
+        return 'success';
+      case 'FAILED':
+        return 'error';
+      case 'UPLOADING':
+        return 'primary';
+      case 'PAUSED':
+        return 'warning';
+      case 'PENDING':
+        return 'default';
+      case 'CANCELLED':
+        return 'default';
+      default:
+        return 'default';
     }
-    
-    if (status === 'UPLOADING' || status === 'PENDING') {
-      return (
-        <Button
-          type="text"
-          danger
-          icon={<CloseOutlined />}
-          onClick={() => handleCancel(task)}
-        >
-          取消
-        </Button>
-      );
-    }
-    
-    if (status === 'CANCELLED') {
-      return (
-        <Button
-          type="text"
-          danger
-          icon={<DeleteOutlined />}
-          onClick={() => handleRemove(task)}
-        >
-          清除记录
-        </Button>
-      );
-    }
-    
-    return null;
   };
 
   if (tasks.length === 0) {
     return (
       <Card>
-        <div style={{ textAlign: 'center', padding: '40px', color: '#999' }}>
-          <p>暂无上传任务</p>
-        </div>
+        <CardContent sx={{ textAlign: 'center', py: 4 }}>
+          <Typography variant="body2" color="text.secondary">
+            暂无上传任务
+          </Typography>
+        </CardContent>
       </Card>
     );
   }
 
   return (
-    <Card title="上传任务列表" bordered={false}>
-      <List
-        dataSource={tasks}
-        renderItem={(task) => {
-          const status = getTaskStatus(task.id)?.status || task.status;
-          const progress = getTaskStatus(task.id)?.progress || task.progress || 0;
-          const errorMessage = getTaskStatus(task.id)?.errorMessage || task.errorMessage;
-          const config = getStatusConfig(status);
-
-          return (
-            <List.Item
-              key={task.id || task.name + Math.random()}
-              actions={getActionButtons(task)}
-              style={{
-                borderBottom: '1px solid #f0f0f0',
-                padding: '16px 0',
-              }}
-            >
-              <div style={{ flex: 1 }}>
-                <div style={{ display: 'flex', alignItems: 'center', marginBottom: '8px' }}>
-                  <span style={{ fontSize: '14px', fontWeight: 500 }}>{task.name}</span>
-                  <Tag color={config.color} style={{ marginLeft: '12px' }}>
-                    {config.text}
-                  </Tag>
-                </div>
-                
-                <div style={{ display: 'flex', alignItems: 'center', marginBottom: '8px' }}>
-                  <span style={{ fontSize: '12px', color: '#999', marginRight: '16px' }}>
-                    {formatFileSize(task.size)}
-                  </span>
-                  <span style={{ fontSize: '12px', color: '#999' }}>
-                    {task.uploadTime ? dayjs(task.uploadTime).format('YYYY-MM-DD HH:mm:ss') : ''}
-                  </span>
-                </div>
-
-                {(status === 'UPLOADING' || status === 'PENDING') && (
-                  <Progress
-                    percent={progress}
+    <Card sx={{ maxHeight, overflow: 'auto' }}>
+      <List sx={{ p: 0 }}>
+        {tasks.map((task) => (
+          <ListItem
+            key={task.id}
+            sx={{
+              bgcolor: task.status === 'FAILED' ? 'error.light' :
+                       task.status === 'COMPLETED' ? 'success.light' :
+                       task.status === 'PAUSED' ? 'warning.light' :
+                       'background.paper',
+              borderBottom: '1px solid',
+              borderColor: 'divider',
+              py: 1.5,
+            }}
+          >
+            <ListItemIcon sx={{ minWidth: 40 }}>
+              {getStatusIcon(task.status)}
+            </ListItemIcon>
+            <ListItemText
+              primary={
+                <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                  <Typography
+                    variant="body2"
+                    sx={{
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                      maxWidth: '300px',
+                    }}
+                  >
+                    {task.fileName}
+                  </Typography>
+                  <Chip
+                    label={getStatusText(task.status)}
+                    color={getStatusColor(task.status)}
                     size="small"
-                    strokeColor="#1890ff"
-                    showInfo={true}
+                    sx={{ ml: 1.5 }}
                   />
-                )}
-
-                {errorMessage && (
-                  <div style={{ fontSize: '12px', color: '#ff4d4f', marginTop: '8px' }}>
-                    {errorMessage}
-                  </div>
-                )}
-              </div>
-            </List.Item>
-          );
-        }}
-      />
+                </Box>
+              }
+              secondary={
+                <Box sx={{ mt: 0.5 }}>
+                  <Typography variant="caption" color="text.secondary">
+                    {formatFileSize(task.loaded)} / {formatFileSize(task.fileSize)}
+                  </Typography>
+                  {task.status === 'UPLOADING' && (
+                    <Typography variant="caption" color="primary" sx={{ display: 'flex', gap: 2, mt: 0.5 }}>
+                      <span>⚡ {formatSpeed(task.speed)}</span>
+                      <span>⏱ {formatTime(task.remainingTime)}</span>
+                      <span>📊 {task.progress}%</span>
+                    </Typography>
+                  )}
+                  {task.status === 'FAILED' && task.error && (
+                    <Typography variant="caption" color="error" sx={{ mt: 0.5, display: 'block' }}>
+                      ✕ {task.error}
+                    </Typography>
+                  )}
+                </Box>
+              }
+            />
+            <ListItemSecondaryAction>
+              {task.status === 'UPLOADING' && (
+                <IconButton edge="end" onClick={() => pauseTask(task.id)} color="warning" size="small">
+                  <span>⏸</span>
+                </IconButton>
+              )}
+              {task.status === 'PAUSED' && (
+                <IconButton edge="end" onClick={() => resumeTask(task.id)} color="primary" size="small">
+                  <span>▶</span>
+                </IconButton>
+              )}
+              {task.status === 'FAILED' && (
+                <IconButton edge="end" onClick={() => retryTask(task.id)} color="primary" size="small">
+                  <span>↻</span>
+                </IconButton>
+              )}
+              {(task.status === 'PENDING' || task.status === 'PAUSED' || task.status === 'FAILED') && (
+                <IconButton edge="end" onClick={() => cancelTask(task.id)} color="error" size="small">
+                  <span>🗑</span>
+                </IconButton>
+              )}
+            </ListItemSecondaryAction>
+          </ListItem>
+        ))}
+      </List>
     </Card>
   );
 };
